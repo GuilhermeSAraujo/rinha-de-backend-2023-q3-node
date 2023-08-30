@@ -35,7 +35,9 @@ const app = express();
 app.use(express.json());
 
 app.post('/pessoas', async (req, res) => {
+  console.log("Request /pessoas", pessoa);
   const pessoa = req.body;
+  console.log({ pessoa });
 
   if (!pessoa.nome || !pessoa.apelido || !pessoa.nascimento /* || josé já existe */) {
     return res.status(422).send("Melhore.");
