@@ -1,0 +1,60 @@
+version: '3.5'
+services:
+  # db:
+  #   image: postgres:latest
+  #   hostname: db
+  #   environment:
+  #     - POSTGRES_PASSWORD=123
+  #     - POSTGRES_USER=admin
+  #     - POSTGRES_DB=rinha
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - ./ddl.sql:/docker-entrypoint-initdb.d/ddl.sql
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0.15'
+  #         memory: '1.0GB'
+  db:
+    container_name: postgres
+    image: postgres:latest
+    ports:
+      - '5433:${DB_PORT}'
+    volumes:
+      - ./ddl.sql:/docker-entrypoint-initdb.d/ddl.sql
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: '2.0GB'
+
+  nodejs:
+    build: .
+    command: node index.js
+    volumes:
+      - .:/usr/app/
+      - /usr/app/node_modules
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_NAME=${DB_NAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_PORT=${DB_PORT}
+    depends_on:
+      - db
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: '1.0GB'
+
+networks:
+  default:
+    driver: bridge
+    name: rinha
