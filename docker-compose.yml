@@ -37,7 +37,6 @@ services:
   api1:
     build: .
     command: node index.js
-    restart: on-failure:5 
     volumes:
       - .:/usr/app/
       - /usr/app/node_modules
@@ -60,7 +59,6 @@ services:
   api2:
     build: .
     command: node index.js
-    restart: on-failure:5 
     volumes:
       - .:/usr/app/
       - /usr/app/node_modules
