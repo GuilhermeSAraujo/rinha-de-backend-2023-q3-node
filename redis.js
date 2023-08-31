@@ -4,7 +4,11 @@ import * as pool from "generic-pool";
 export const poolRedis = pool.createPool(
   {
     async create() {
-      const redis = new Redis({ enableAutoPipelining: true, host: "redis" });
+      const redis = new Redis({
+        enableAutoPipelining: true,
+        host: "redis",
+        tcpKeepAlive: true,
+      });
 
       redis.on("error", () => {
         throw new Error("redis closed connection");
@@ -21,7 +25,7 @@ export const poolRedis = pool.createPool(
       await client.quit();
     },
   },
-  { max: 50, min: 5 }
+  { max: 100, min: 10 }
 );
 
 export const hasApelidoOnCache = async (apelido) => {
@@ -48,9 +52,17 @@ export const setRequestCache = async (request, body) => {
   await poolRedis.release(pool);
 };
 
+export const getRequestCache = async (request) => {
+  const pool = await poolRedis.acquire();
+  const reqCache = await pool.get(request);
+  await poolRedis.release(pool);
+
+  return reqCache;
+}
+
 export const setPessoaOnCache = async (personId, person) => {
   const pool = await poolRedis.acquire();
-  await pool.set(personId, person);
+  await pool.set(personId, JSON.stringify(person));
   await poolRedis.release(pool);
 };
 
@@ -60,3 +72,12 @@ export const hasPessoaOnCache = async (id) => {
   await poolRedis.release(pool);
   return existsOnCache;
 };
+
+export const getPessoaFromCache = async (id) => {
+  const pool = await poolRedis.acquire();
+  const person = await pool.get(id);
+  await poolRedis.release(pool);
+  return person;
+};
+
+
