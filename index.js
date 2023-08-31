@@ -15,10 +15,10 @@ import {
 
 // const connection = new Client("Host=db;Username=admin;Password=123;Database=rinha");
 const sql = postgres({
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
+  database: 'rinhadb',
+  password: '1234',
+  host: 'database',
+  user: 'root',
   max: 100,
   idle_timeout: 20,
   max_lifetime: 60 * 30
@@ -37,9 +37,10 @@ const app = new HyperExpress.Server({ trust_proxy: true });
 app.use(cors());
 
 app.post("/pessoas", async (req, res) => {
+  console.log("/pessoas - cadastro");
   try {
 
-    const body = req.json();
+    const body = await req.json();
     const pessoa = body;
 
     if (
@@ -52,8 +53,7 @@ app.post("/pessoas", async (req, res) => {
       return res.status(422).send("Melhore.");
     }
 
-    const entryData = `${pessoa.nome}${pessoa.apelido}${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join(",") : ""
-      }`;
+    const entryData = `${pessoa.nome}${pessoa.apelido}${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join(",") : ""}`;
 
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(pessoa.nascimento);
 
@@ -73,11 +73,9 @@ app.post("/pessoas", async (req, res) => {
     }
 
     pessoa.id = randomUUID();
-    await sql`
-    INSERT INTO pessoas (id, nome, apelido, nascimento, stack)
-    VALUES
-    (${pessoa.id}, ${pessoa.nome}, ${pessoa.apelido}, ${pessoa.nascimento}, ${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join(",") : null}) ON CONFLICT (apelido) DO NOTHING`;
-    console.log(`Pessoa criada! ${pessoa.apelido}`);
+    sql`
+    INSERT INTO pessoas ${sql(pessoa)} ON CONFLICT (apelido) DO NOTHING`;
+    console.log('Pessoa criada!');
 
     await Promise.all([
       await setApelidoOnCache(pessoa.apelido),
@@ -93,15 +91,17 @@ app.post("/pessoas", async (req, res) => {
   } catch (err) {
     return res
       .status(418)
-      .json(err);
+      .json(err.message);
   }
 });
 
 app.get("/pessoas/:id", async (req, res) => {
+  console.log('/pessoas/:id', JSON.stringify(req.path_parameters));
   try {
-    const id = req.path_parameters.id;
-    console.log('id - /pessoas/:id', id);
-    if (!id) return res.status(404).json({});
+    const pathParam = req.path_parameters;
+    if (!pathParam || !pathParam.id) return res.status(404).json({});
+
+    const id = pathParam.id;
 
     const pessoaLocalCache = cache.get(id);
     if (pessoaLocalCache) {
@@ -135,32 +135,33 @@ app.get("/pessoas/:id", async (req, res) => {
 
 app.get("/pessoas", async (req, res) => {
   try {
-    const termo = request.query_parameters;
-    console.log('termo - /pessoas/:termo', termo);
+    console.log('/pessoas?:termo', JSON.stringify(req.query_parameters));
+    const queryParam = req.query_parameters;
 
-    if (!termo) return res.status(400).json({});
+    if (!queryParam || !queryParam.t) return res.status(400).json({});
+
+    const termo = queryParam.t;
 
     const peopleMatch = cache.get(termo);
     if (peopleMatch) return res.status(200).json(peopleMatch);
 
     const dbRes = await sql`
-    SELECT id, nome, apelido, nascimento, stack FROM pessoas where termo ILIKE ${'%' + sql(termo) + '%'}`;
+    SELECT id, nome, apelido, nascimento, stack FROM pessoas where termo ILIKE ${'%' + sql(termo) + '%'} LIMIT 50`;
 
-    cache.set(termo, dbRes.rows, 15);
-
-    return res.status(200).json(dbRes.rows);
+    cache.set(termo, dbRes, 15);
+    return res.status(200).json(dbRes);
   } catch (err) {
     return res
       .status(418)
-      .json(err);
+      .json(err.message);
   }
 });
 
 app.get("/contagem-pessoas", async (req, res) => {
   try {
 
-    const numCadastro = await sql`SELECT count(*) from public.people`
-    console.log({ count: numCadastro[0].count });
+    const numCadastro = await sql`SELECT count(*) from public.pessoas`
+    console.log(numCadastro);
 
     return res.status(200).json({ count: numCadastro });
   } catch (err) {
@@ -168,6 +169,6 @@ app.get("/contagem-pessoas", async (req, res) => {
   }
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Running on http://${HOST}:${PORT}`);
-});
+app.listen(8080)
+  .then((socket) => console.log(`Listening on 8080`))
+  .catch((e) => console.log("Exception starting server", e.message));

@@ -1,4 +1,4 @@
-FROM node:18
+FROM node:20.5.1-buster
 # Create app directory
 WORKDIR /usr/src/app
 # Install app dependencies
