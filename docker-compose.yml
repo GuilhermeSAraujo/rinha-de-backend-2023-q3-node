@@ -18,7 +18,8 @@ services:
   #         memory: '1.0GB'
   db:
     container_name: postgres
-    image: postgres:latest
+    image: postgres
+    command: 'postgres -c max_connections=200 -c shared_buffers=256MB -c fsync=off -c full_page_writes=off'
     ports:
       - '5433:${DB_PORT}'
     volumes:
@@ -29,8 +30,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.95'
-          memory: '1.9GB'
+          cpus: '0.9'
+          memory: '1.2GB'
 
   api1:
     build: .
@@ -89,7 +90,18 @@ services:
       resources:
         limits:
           cpus: "0.3"
-          memory: "0.5GB"
+          memory: "1.0GB"
+
+  redis:
+    image: redis:latest
+    hostname: redis
+    ports:
+      - 6379:6379
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: '0.3GB'
 
 networks:
   default:
