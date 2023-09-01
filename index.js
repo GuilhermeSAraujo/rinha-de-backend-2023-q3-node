@@ -4,158 +4,129 @@ import NodeCache from "node-cache";
 import cors from 'cors';
 import { randomUUID } from 'node:crypto';
 import {
-  setApelidoOnCache,
-  hasApelidoOnCache,
-  setRequestCache,
-  getRequestCache,
+	setApelidoOnCache,
+	hasApelidoOnCache,
+	setRequestCache,
+	getRequestCache,
 } from "./redis.js";
+import validations from './validations.js';
 
-// const connection = new Client("Host=db;Username=admin;Password=123;Database=rinha");
 const sql = postgres({
-  host: 'db',
-  user: 'root',
-  password: '1234',
-  database: 'rinhadb',
-  max: 100,
-  idle_timeout: 20,
-  max_lifetime: 60 * 30
+	host: 'db',
+	user: 'root',
+	password: '1234',
+	database: 'rinhadb',
+	max: 100,
+	idle_timeout: 20,
+	max_lifetime: 60 * 30
 });
-// pool.connect();
 
+// creating local cache
 const cache = new NodeCache();
 
-// App
+// creating server
 const app = new HyperExpress.Server({ trust_proxy: true });
 
 app.use(cors());
 
+app.get("/contagem-pessoas", async (req, res) => {
+	const dbRes = await sql`SELECT COUNT(*) FROM pessoas`;
+	return res.status(200).json(dbRes[0].count);
+});
+
 app.post("/pessoas", async (req, res) => {
-  // try {
-  const body = await req.json();
-  const pessoa = body;
+	const body = await req.json();
+	const person = body;
 
-  if (
-    !pessoa.nome ||
-    !pessoa.apelido ||
-    !pessoa.nascimento
-  ) {
-    return res.status(400).send("Melhore.");
-  }
+	if (validations.hasNullInput(person))
+		return res.status(400).send("Melhore.");
 
-  if (pessoa.nome.length > 100 ||
-    typeof pessoa.nome === 'number' ||
-    pessoa.apelido.length > 32 ||
-    typeof pessoa.apelido === 'number' ||
-    pessoa.nome.includes("null") ||
-    pessoa.apelido.includes("null")
-  ) {
-    return res.status(422).send("Melhore.");
-  }
+	if (validations.hasInvalidSizeInput(person))
+		return res.status(422).send("Melhore.");
 
-  const entryData = `${pessoa.nome}${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join("") : ""}`;
-  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(pessoa.nascimento);
+	if (validations.hasInvalidChar(person))
+		return res.status(400).send("Mal request.");
 
-  if (/\d/.test(entryData) || !validDate) {
-    return res.status(400).send("Mal request.");
-  }
-  if (pessoa.stack && pessoa.stack.length > 0) {
-    const stackTooLong = `${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join("") : ""}`.length > 32 * pessoa.stack.length;
-    if (stackTooLong) {
-      return res.status(400).send("Mal request.");
-    }
-    return;
-  }
+	if (validations.hasLongStack(person)) {
+		return res.status(422).send("Melhore.");
+	}
 
-  const pessoaOnLocalCache = cache.get(pessoa.apelido);
-  if (pessoaOnLocalCache) {
-    return res.status(422).send("Melhore.");
-  }
+	const personOnLocalCache = cache.get(person.apelido);
+	if (personOnLocalCache) {
+		return res.status(422).send("Melhore.");
+	}
 
-  if (await hasApelidoOnCache(pessoa.apelido)) {
-    return res.status(422).send("Melhore.");
-  }
+	if (await hasApelidoOnCache(person.apelido)) {
+		return res.status(422).send("Melhore.");
+	}
 
-  pessoa.id = randomUUID();
+	person.id = randomUUID();
 
-  await sql`INSERT INTO pessoas  (id, nome, apelido, nascimento, stack) values (${pessoa.id}, ${pessoa.nome}, ${pessoa.apelido}, ${pessoa.nascimento}, ${pessoa.stack}) ON CONFLICT (apelido) DO NOTHING`;
+	await sql`INSERT INTO pessoas  (id, nome, apelido, nascimento, stack) values (${person.id}, ${person.nome}, ${person.apelido}, ${person.nascimento}, ${person.stack}) ON CONFLICT (apelido) DO NOTHING`;
 
-  cache.set(pessoa.id, pessoa, 300);
-  cache.set(pessoa.apelido, pessoa, 300);
+	cache.set(person.id, person, 5000);
+	cache.set(person.apelido, person, 5000);
 
-  await Promise.all([
-    await setApelidoOnCache(pessoa.apelido),
-    await setRequestCache(`pessoas:${pessoa.id}`, JSON.stringify(pessoa)),
-  ]);
+	await Promise.all([
+		await setApelidoOnCache(person.apelido),
+		await setRequestCache(`persons:${person.id}`, JSON.stringify(person)),
+	]);
 
-  return res
-    .status(201)
-    .header("Location", `/pessoas/${pessoa.id}`)
-    .json(pessoa);
-
-  // } catch (err) {
-  //   return res
-  //     .status(418)
-  //     .json(err.message);
-  // }
+	return res
+		.status(201)
+		.header("Location", `/pessoas/${person.id}`)
+		.json(person);
 });
 
 app.get("/pessoas/:id", async (req, res) => {
-  try {
-    const pathParam = req.path_parameters;
-    if (!pathParam || !pathParam.id) return res.status(404).json({});
+	try {
+		const pathParam = req.path_parameters;
+		console.log('pathParam', pathParam);
+		if (!pathParam || !pathParam.id) return res.status(404).json({});
 
-    const id = pathParam.id;
+		const id = pathParam.id;
 
-    const pessoaLocalCache = cache.get(id);
-    if (pessoaLocalCache)
-      return res.status(200).setHeader('cache-control', 'public, max-age=604800, immutable').json(pessoaLocalCache);
+		const personOnLocalCache = cache.get(id);
+		if (personOnLocalCache)
+			return res.status(200).setHeader('cache-control', 'public, max-age=604800, immutable').json(personOnLocalCache);
 
-    const pessoaRedisCache = await getRequestCache(`pessoas:${id}`);
-    if (pessoaRedisCache)
-      return res.status(200).header('cache-control', 'public, max-age=604800, immutable').json(JSON.parse(pessoaRedisCache));
+		const personOnRedisCache = await getRequestCache(`persons:${id}`);
+		if (personOnRedisCache)
+			return res.status(200).header('cache-control', 'public, max-age=604800, immutable').json(JSON.parse(personOnRedisCache));
 
-    return res.status(404).json({});
-  } catch (err) {
-    return res
-      .status(418)
-      .json(err);
-  }
-  // const dbRes = await pool.query(
-  //   "SELECT id, nome, apelido, nascimento, stack FROM pessoas where id = $1",
-  //   [id]
-  // );
-  // console.log("Consultou o BANCO para rota /id");
-  // if (dbRes.rows.length === 0) 
-
-  // cache.set(id, dbRes.rows[0]);
-
-  // return res.status(200).header('cache-control', 'public, max-age=604800, immutable').json(dbRes.rows[0]);
+		console.log("Caiu no 404???", personOnLocalCache, personOnRedisCache);
+		return res.status(404).json({});
+	} catch (err) {
+		return res
+			.status(500)
+			.json(err);
+	}
 });
 
 app.get("/pessoas", async (req, res) => {
-  try {
-    // console.log('/pessoas?:termo', JSON.stringify(req.query_parameters));
-    const queryParam = req.query_parameters;
+	try {
+		const queryParam = req.query_parameters;
 
-    if (!queryParam || !queryParam.t) return res.status(400).json({});
+		if (!queryParam || !queryParam.t) return res.status(400).json({});
 
-    const termo = queryParam.t;
+		const term = queryParam.t;
 
-    const peopleMatch = cache.get(termo);
-    if (peopleMatch) return res.status(200).json(peopleMatch);
+		const peopleMatch = cache.get(term);
+		if (peopleMatch) return res.status(200).json(peopleMatch);
 
-    const dbRes = await sql`
-    SELECT id, nome, apelido, nascimento, stack FROM pessoas where termo ILIKE ${'%' + sql(termo) + '%'} LIMIT 50`;
+		const dbRes = await sql`
+    	SELECT id, nome, apelido, nascimento, stack FROM pessoas where termo ILIKE ${'%' + sql(term) + '%'} LIMIT 50`;
 
-    cache.set(termo, dbRes, 15);
-    return res.status(200).json(dbRes);
-  } catch (err) {
-    return res
-      .status(418)
-      .json(err.message);
-  }
+		cache.set(term, dbRes, 15);
+
+		return res.status(200).json(dbRes);
+	} catch (err) {
+		return res
+			.status(500)
+			.json(err.message);
+	}
 });
 
 app.listen(8080)
-  .then((socket) => console.log(`Listening on 8080`))
-  .catch((e) => console.log("Exception starting server", e.message));
+	.then((socket) => console.log(`Listening on 8080`))
+	.catch((e) => console.log("Exception starting server", e.message));
