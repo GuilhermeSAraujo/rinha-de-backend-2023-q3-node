@@ -80,4 +80,7 @@ export const getPessoaFromCache = async (id) => {
   return person;
 };
 
-
+export const getTotalKeys = async () => {
+  const keys = await poolRedis.keys('*')
+  console.log('keys', keys);
+}

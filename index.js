@@ -7,18 +7,15 @@ import {
   setApelidoOnCache,
   hasApelidoOnCache,
   setRequestCache,
-  setPessoaOnCache,
-  hasPessoaOnCache,
-  getPessoaFromCache,
-  getRequestCache
+  getRequestCache,
 } from "./redis.js";
 
 // const connection = new Client("Host=db;Username=admin;Password=123;Database=rinha");
 const sql = postgres({
-  database: 'rinhadb',
-  password: '1234',
-  host: 'database',
+  host: 'db',
   user: 'root',
+  password: '1234',
+  database: 'rinhadb',
   max: 100,
   idle_timeout: 20,
   max_lifetime: 60 * 30
@@ -27,76 +24,82 @@ const sql = postgres({
 
 const cache = new NodeCache();
 
-// Constants
-const PORT = 8080;
-const HOST = "0.0.0.0";
-
 // App
 const app = new HyperExpress.Server({ trust_proxy: true });
 
 app.use(cors());
 
 app.post("/pessoas", async (req, res) => {
-  console.log("/pessoas - cadastro");
-  try {
+  // try {
+  const body = await req.json();
+  const pessoa = body;
 
-    const body = await req.json();
-    const pessoa = body;
+  if (
+    !pessoa.nome ||
+    !pessoa.apelido ||
+    !pessoa.nascimento
+  ) {
+    return res.status(400).send("Melhore.");
+  }
 
-    if (
-      !pessoa.nome ||
-      !pessoa.apelido ||
-      !pessoa.nascimento ||
-      pessoa.nome.includes("null") ||
-      pessoa.apelido.includes("null")
-    ) {
-      return res.status(422).send("Melhore.");
-    }
+  if (pessoa.nome.length > 100 ||
+    typeof pessoa.nome === 'number' ||
+    pessoa.apelido.length > 32 ||
+    typeof pessoa.apelido === 'number' ||
+    pessoa.nome.includes("null") ||
+    pessoa.apelido.includes("null")
+  ) {
+    return res.status(422).send("Melhore.");
+  }
 
-    const entryData = `${pessoa.nome}${pessoa.apelido}${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join(",") : ""}`;
+  const entryData = `${pessoa.nome}${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join("") : ""}`;
+  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(pessoa.nascimento);
 
-    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(pessoa.nascimento);
-
-    if (/\d/.test(entryData) || !validDate) {
+  if (/\d/.test(entryData) || !validDate) {
+    return res.status(400).send("Mal request.");
+  }
+  if (pessoa.stack && pessoa.stack.length > 0) {
+    const stackTooLong = `${pessoa.stack && pessoa.stack.length > 0 ? pessoa.stack.join("") : ""}`.length > 32 * pessoa.stack.length;
+    if (stackTooLong) {
       return res.status(400).send("Mal request.");
     }
-
-    const pessoaOnLocalCache = cache.get(pessoa.apelido);
-    if (pessoaOnLocalCache) {
-      console.log("Pessoa já existe no cache local.");
-      return res.status(422).send("Melhore.");
-    }
-
-    if (await hasApelidoOnCache(pessoa.apelido)) {
-      console.log("Pessoa já existe no cache redis.");
-      return res.status(422).send("Melhore.");
-    }
-
-    pessoa.id = randomUUID();
-    sql`
-    INSERT INTO pessoas ${sql(pessoa)} ON CONFLICT (apelido) DO NOTHING`;
-    console.log('Pessoa criada!');
-
-    await Promise.all([
-      await setApelidoOnCache(pessoa.apelido),
-      await setRequestCache(`pessoas:${pessoa.id}`, JSON.stringify(pessoa)),
-    ]);
-
-    cache.set(pessoa.id, pessoa, 300);
-    cache.set(pessoa.apelido, pessoa, 300);
-    return res
-      .status(201)
-      .header("Location", `/pessoas/${pessoa.id}`)
-      .json(pessoa);
-  } catch (err) {
-    return res
-      .status(418)
-      .json(err.message);
+    return;
   }
+
+  const pessoaOnLocalCache = cache.get(pessoa.apelido);
+  if (pessoaOnLocalCache) {
+    return res.status(422).send("Melhore.");
+  }
+
+  if (await hasApelidoOnCache(pessoa.apelido)) {
+    return res.status(422).send("Melhore.");
+  }
+
+  pessoa.id = randomUUID();
+
+  await sql`INSERT INTO pessoas  (id, nome, apelido, nascimento, stack) values (${pessoa.id}, ${pessoa.nome}, ${pessoa.apelido}, ${pessoa.nascimento}, ${pessoa.stack}) ON CONFLICT (apelido) DO NOTHING`;
+
+  cache.set(pessoa.id, pessoa, 300);
+  cache.set(pessoa.apelido, pessoa, 300);
+
+  await Promise.all([
+    await setApelidoOnCache(pessoa.apelido),
+    await setRequestCache(`pessoas:${pessoa.id}`, JSON.stringify(pessoa)),
+  ]);
+
+  return res
+    .status(201)
+    .header("Location", `/pessoas/${pessoa.id}`)
+    .json(pessoa);
+
+  // } catch (err) {
+  //   return res
+  //     .status(418)
+  //     .json(err.message);
+  // }
 });
 
 app.get("/pessoas/:id", async (req, res) => {
-  console.log('/pessoas/:id', JSON.stringify(req.path_parameters));
   try {
     const pathParam = req.path_parameters;
     if (!pathParam || !pathParam.id) return res.status(404).json({});
@@ -104,16 +107,12 @@ app.get("/pessoas/:id", async (req, res) => {
     const id = pathParam.id;
 
     const pessoaLocalCache = cache.get(id);
-    if (pessoaLocalCache) {
-      console.log("Pessoa consultada já no cache local");
+    if (pessoaLocalCache)
       return res.status(200).setHeader('cache-control', 'public, max-age=604800, immutable').json(pessoaLocalCache);
-    }
 
     const pessoaRedisCache = await getRequestCache(`pessoas:${id}`);
-    if (pessoaRedisCache) {
-      console.log("Pessoa consultada já no cache redis");
+    if (pessoaRedisCache)
       return res.status(200).header('cache-control', 'public, max-age=604800, immutable').json(JSON.parse(pessoaRedisCache));
-    }
 
     return res.status(404).json({});
   } catch (err) {
@@ -135,7 +134,7 @@ app.get("/pessoas/:id", async (req, res) => {
 
 app.get("/pessoas", async (req, res) => {
   try {
-    console.log('/pessoas?:termo', JSON.stringify(req.query_parameters));
+    // console.log('/pessoas?:termo', JSON.stringify(req.query_parameters));
     const queryParam = req.query_parameters;
 
     if (!queryParam || !queryParam.t) return res.status(400).json({});
@@ -154,18 +153,6 @@ app.get("/pessoas", async (req, res) => {
     return res
       .status(418)
       .json(err.message);
-  }
-});
-
-app.get("/contagem-pessoas", async (req, res) => {
-  try {
-
-    const numCadastro = await sql`SELECT count(*) from public.pessoas`
-    console.log(numCadastro);
-
-    return res.status(200).json({ count: numCadastro });
-  } catch (err) {
-    return res.status(418).json(err);
   }
 });
 
