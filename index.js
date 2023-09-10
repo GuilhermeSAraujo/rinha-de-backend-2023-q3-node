@@ -126,8 +126,6 @@ app.get("/pessoas", async (req, res) => {
 				"%" + sql(term) + "%"
 			} LIMIT 50`;
 
-		// cache.set(term, dbRes, 15);
-
 		return res.status(200).json(dbRes);
 	} catch (err) {
 		return res.status(500).json(err.message);
