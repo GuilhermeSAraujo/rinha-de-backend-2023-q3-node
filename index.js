@@ -29,6 +29,8 @@ const app = new HyperExpress.Server({ trust_proxy: true });
 
 app.use(cors());
 
+const peopleToInsert = [];
+
 app.get("/contagem-pessoas", async (req, res) => {
 	const dbRes = await sql`SELECT COUNT(*) FROM pessoas`;
 	return res.status(200).json(dbRes[0].count);
@@ -51,11 +53,21 @@ app.post("/pessoas", async (req, res) => {
 
 	person.id = randomUUID();
 
-	await sql`INSERT INTO pessoas  (id, nome, apelido, nascimento, stack) values (${
-		person.id
-	}, ${person.nome}, ${person.apelido}, ${person.nascimento}, ${
-		person.stack && Array.isArray(person.stack) ? person.stack.join(" ") : ""
-	}) ON CONFLICT (apelido) DO NOTHING`;
+	peopleToInsert.push(person);
+
+	if (peopleToInsert.length === 100) {
+		peopleToInsert.forEach(async (person) => {
+			await sql`INSERT INTO pessoas  (id, nome, apelido, nascimento, stack) values (${
+				person.id
+			}, ${person.nome}, ${person.apelido}, ${person.nascimento}, ${
+				person.stack && Array.isArray(person.stack)
+					? person.stack.toString()
+					: ""
+			}) ON CONFLICT (apelido) DO NOTHING`;
+		});
+
+		peopleToInsert.splice(0, peopleToInsert.length);
+	}
 
 	cache.set(person.id, person, 5000);
 	cache.set(person.apelido, person, 5000);
@@ -92,7 +104,6 @@ app.get("/pessoas/:id", async (req, res) => {
 				.header("cache-control", "public, max-age=604800, immutable")
 				.json(JSON.parse(personOnRedisCache));
 
-		console.log("Caiu no 404???", personOnLocalCache, personOnRedisCache);
 		return res.status(404).json({});
 	} catch (err) {
 		return res.status(500).json(err);
@@ -111,11 +122,11 @@ app.get("/pessoas", async (req, res) => {
 		if (peopleMatch) return res.status(200).json(peopleMatch);
 
 		const dbRes = await sql`
-    	SELECT id, nome, apelido, nascimento, stack FROM pessoas where termo ILIKE ${
+    	SELECT id, nome, apelido, nascimento, stack FROM pessoas where termo LIKE ${
 				"%" + sql(term) + "%"
 			} LIMIT 50`;
 
-		cache.set(term, dbRes, 15);
+		// cache.set(term, dbRes, 15);
 
 		return res.status(200).json(dbRes);
 	} catch (err) {
